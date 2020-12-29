@@ -11,22 +11,44 @@ SUV 项目总结
 
 ​		使用Spring Boot & Cloud实现的微服务架构，Maven做依赖管理，Consul做服务注册和发现，Mysql做数据存储，Redis做缓存实现，RabbitMQ作为系统的输入通道，使用Docker做服务的部署。
 
-## 三、模块
+## 三、模块简述
 
 ​		SUV主要分为以下四个功能模块，每个模块对应一个微服务：
 
-* 原始数据收集模块：data-collector service，负责从RabbitMQ中收集STP使用状态和测试用例执行状态的Eiffel Message，并将原始数据保存入库。
+* 原始数据收集模块：data-collector service，负责从RabbitMQ中收集job和testcase相关的Eiffel Message，处理成原始数据并入库。
+* STP信息管理模块：stp-manager，负责从外部接口查询STP的详细信息，保存入库并缓存，以及从RabbitMQ中收集stpconfig相关的Eiffel Message用来更新数据库和缓存。
 * 数据计算模块：data-processor service，从数据库中读取原始数据并计算，并将计算后的数据保存入库。
-* STP信息管理模块：stp-manager service，负责保存和管理STP的基本信息，并负责从RabbitMQ中收集STP配置变更的Eiffel Message。
 * 消息恢复模块：data-recovery service，查找由于异常丢失的Eiffel Message并发送给数据收集模块进行恢复。
+
+## 四、原始数据收集模块（data-collector service）简述
+
+### 1. 表结构
+
+![alt data-collector-db](image/data-collector-db.png)
+
+### 2. Job&Testcase相关的Eiffel message
+
+​		data-collector服务将从RabbitMQ中收集5种Eiffel Message，分别为Job相关的三种：JobQueueEvent、JobStartedEvent和JobFinishedEvent，以及Testcase相关的两种：TestcaseStartedEvent、TestcaseFinishedEvent。
+
+​		JobQueueEvent表示一个Job已经加入了某个STP pool的等待队列中，等待空闲的STP被分配出来用以执行该任务。该message中的关键字段有：domainId表示该message的发送方、eventType表示event类型、eventTime表示该event的发生时间、jobExecutionId表示该job的唯一标识、jobId也表示该job的唯一标识。值得注意的是，该类message中没有STP的名字，因为等待阶段该job的STP还没有分配。
+
+​		JobStartedEvent表示一个Job已经被分配了STP并开始执行，该message中的关键字段有：domainId、eventType、eventTime、jobExecutionId、jobId、stp表示执行该job的STP的名字。Job执行过程中，除了最开始的install UP环节外，大部分时间都是在串行执行多个Testcase。
+
+​		TestcaseStartedEvent表示一个testcase开始执行，该message中的关键字段除了domainId、eventType、eventTime、jobExecutionId、jobId、stp等字段外，还有testCaseExecutionId是该testcase的唯一标识。
+
+​		TestcaseFinishedEvent表示一个testcase执行结束，该message中的关键字段为domainId、eventType、eventTime、jobExecutionId、jobId、stp、testCaseExecutionId，除了这些还有resultCode表示该testcase的执行结果是成功还是失败。
+
+![alt eiffel-flow](image/eiffel-flow.png)
+
+​		如上图所示是一个完整的Job执行流程，该Job执行期间运行了三个testcase。图上涉及的9个event中的domainId、jobExecutionId、jobId、stp应该都是相同的。每一对testcase的event中testCaseExecutionId应该是相同的。每一个event中还有一个inputEvent字段，其值为该message上游message的eventId的值，该字段的作用是：当我们拿到某个message，便可以通过inputEvent字段找到该message所处job工作流的上游全部message。
+
+### 3. 数据处理流程
+
+
 
 
 
 ## X、问题
-
-1）明确一下每个计算项目都是怎么计算的。
-
-2）
 
 
 
