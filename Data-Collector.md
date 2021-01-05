@@ -2,7 +2,7 @@
 
 ## 一、数据库表结构
 
-![alt data-collector-db](C:\GitRepository\Z-DYZ\SUV-Summary\image\data-collector-db.png)
+![alt data-collector-db](./image/data-collector-db.png)
 
 ## 二、该模块相关的Eiffel Message
 
@@ -32,7 +32,7 @@
 
 ​		如图所示是一个完整的Job执行流程，该Job执行期间运行了三个testcase。图上涉及的9个event中的domainId、jobExecutionId、jobId、stp应该都是相同的。每一对testcase的event中testCaseExecutionId应该是相同的。每一个event中还有一个inputEvent字段，其值为该message上游message的eventId的值，该字段的作用是：当我们拿到某个message，便可以通过inputEvent字段找到该message所处job工作流的上游全部message。
 
-![alt eiffel-flow](C:\GitRepository\Z-DYZ\SUV-Summary\image\eiffel-flow.png)
+![alt eiffel-flow](./image/eiffel-flow.png)
 
 ## 三、 数据处理流程
 
