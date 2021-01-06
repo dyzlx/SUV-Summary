@@ -171,4 +171,16 @@ public void service() {
 
 ### 2. 死锁问题
 
-​		代码中事务的隔离级别使用的是RR隔离级别（Repeatable Read 可重复读），该隔离级别下存在Gap锁，即InnoDB的行锁行为实际上是Next-Key Lock（行锁+Gap锁），上面的问题中我们为了解决多个TestcaseEvent并发修改同一记录的同一字段的问题，在select语句上加了锁（select ... for update），这个锁在RR隔离级别下是Next-Key Lock，即存在Gap锁，
+​		代码中事务的隔离级别使用的是RR隔离级别（Repeatable Read 可重复读），该隔离级别下存在Gap锁，即InnoDB的行锁行为实际上是Next-Key Lock（行锁+Gap锁），上面的问题中我们为了解决多个TestcaseEvent并发修改同一记录的同一字段的问题，在select语句上加了锁（select ... for update），这个锁在RR隔离级别下是Next-Key Lock，即存在Gap锁。
+
+​		问题在于，当同一个Job的两个TestcaseStartedEvent同时被处理，两个线程A和B几乎同时在JobActivity表上执行select ... where testcase_execution_id=? for update语句，因为暂时不存在对应的testcase_execution类型的纪录，所以两个事务在数据库的同一位置加上了Gap Lock，然后A和B同时创建一个新的对象，先后执行insert语句，A事务发现该位置存在B事务的Gap锁，所以向该位置加一个插入意向锁，并处于等待状态，等待B事务的Gap锁释放；同样的，B事务发现A事务的Gap锁，于是也向该位置加一个插入意向锁，并处于等待状态，等待A事务的Gap锁释放。而两个事务的Gap锁只有在事务结束时才能释放，死锁发生了（如下表梳理）。
+
+|                            事务A                             |                            事务B                             |
+| :----------------------------------------------------------: | :----------------------------------------------------------: |
+| select * from table where testcase_execution_id=a for update;<br>【唯一索引列检索不存在的纪录，该记录位置加Gap锁A，事务结束释放】 |                                                              |
+|                                                              | select * from table where testcase_execution_id=a for update;<br>【唯一索引列检索不存在的纪录，该记录位置加Gap锁B，事务结束释放，（Gap锁之间不会冲突）】 |
+| insert into table(id, ....) values(a, ....);<br>【该事务发现事务B在这个位置有Gap锁B，于是向该位置添加Insert Intention Lock，并等待事务B释放Gap锁B】 |                                                              |
+|                                                              | insert into table(id, ....) values(a, ....);<br>【该事务发现事务A在这个位置有Gap锁A，于是向该位置添加Insert Intention Lock，并等待事务A释放Gap锁A】 |
+|                           DeadLock                           |                           DeadLock                           |
+
+​		综上，死锁的原因是由于Gap锁导致的，问题的解决方法就是将事务的隔离级别调整为RC隔离级别（Read Commit 读提交）。该隔离级别下不存在Gap锁，select ... for update在纪录不存在的情况下没有加锁。但是在隔离级别下的幻读问题如何处理？
