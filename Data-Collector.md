@@ -39,10 +39,9 @@
 ### 1、当接收到JobQueueEvent时
 
 - Job表插入一条新的记录，写入job_id，job_execution_id，并将该Event中的eventTime做为job_start_time。或者根据jobId/jobExecutionId查询已经存在的纪录，并更新以上字段。（有可能是data-collector先收到了该Job其他的event，所以jobId/jobExecutionId对应的纪录已经存在）
-
 - JobActivity表插入一条job_activity_type为job_queue的新纪录，写入job_id，job_execution_id，并将该Event中的eventTime字段的值做为job_activity_start_time。或者根据jobId/jobExecutionId查询job_activity_type为job_queue的纪录，并更新以上字段。(有可能是data-collector先收到了该Job的JobStartedEvent，所以该jobId或者jobExecutionId对应的job_activity_type为job_queue的纪录已经存在）
 - JobActivityEvent表中插入一条新的记录，写入event_id和job_activity_id字段。
-
+- 从该Event中获取stp字段，使用该值访问stp-cache模块，获取stp的详细信息。
 - Event表中插入一条新的纪录，写入相关字段。
 
 ### 2、当接收到JobStartedEvent时
@@ -81,7 +80,9 @@
 
 ## 四、该模块中解决的关键问题
 
-#### 1、多条Message并发更新同一条记录
+### 1、多条Message并发更新同一条记录
+
+#### a) Job表记录的startTime和endTime同时被JobQueueEvent和JobFinishedEvent更新产生的主键冲突问题和字段丢失问题
 
 ​		Job表和Testcase表的主键不是自增主键，Job表为JobId，Tsetcase表为TestcaseExecutionId，表中每一条记录的start_time和end_time两个字段分别是两条Eiffel Message负责更新的，例如对于一个Job表的记录，其start_time是由JobQueueEvent更新，end_time是由JobFinishedEvent更新。更新该条记录的伪代码如下：
 
@@ -158,4 +159,16 @@ public void service() {
 
 ​		如此，A和B线程同时查询记录不存在并创建新对象后都会执行insert方法，后者主键冲突后重试整个方法，重新查询Job对象存在，就会正常更新。
 
-​		
+#### b) JobActivity表中testcase_execution类型的activity记录的startTime和endTime并发被多个testcase message更新造成的startTime和endTime不正确问题
+
+​		JobActivity表中activity_type为testcase_execution的记录会在Testcase表中对应多个testcase记录，其startTime和endTime分别对应这些Testcase中的最早的startTime和最晚的endTime。
+
+​		但是同一个Job的多个TestcaseStartEvent和FinishedEvent不会按照其执行的顺序到达，而是乱序到达的，所以当收到一个TestcaseStartedEvent时，首先要根据JobActivity表中对应的testcase_execution的记录的startTime做对比，如果该event中的startTime比现在表中的startTime还要早，就更新这个字段，否则就不更新，收到TestcaseFinishedEvent时同理，要选择最晚的endTime来更新。
+
+​		问题在于，这多个Testcase对应的Message可能同时到达，数据库中就会出现多线程并发更新同一个字段的问题，在data-collector多实例部署时更会如此。最终就可能导致，JobActivity中记录的startTime并非最早的执行的testcase的startTime，记录的endTime也并非最晚执行的testcase的endTime。
+
+​		解决方法就是在select对应的JobActivity记录时加锁，使用select ... where id=? for update语句，该语句会在RR和RC隔离级别下为搜索到的行加上排他的行锁（如果不使用唯一索引搜索就会在RR隔离级别下加Next-Key Lock），事务结束后会释放锁（每一个Eiffel Message的处理流程上加事务）。这样就保证了每次只会有一个线程来更新这个记录的startTime或者endTime。
+
+### 2. 死锁问题
+
+​		代码中事务的隔离级别使用的是RR隔离级别（Repeatable Read 可重复读），该隔离级别下存在Gap锁，即InnoDB的行锁行为实际上是Next-Key Lock（行锁+Gap锁），上面的问题中我们为了解决多个TestcaseEvent并发修改同一记录的同一字段的问题，在select语句上加了锁（select ... for update），这个锁在RR隔离级别下是Next-Key Lock，即存在Gap锁，
