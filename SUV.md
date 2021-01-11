@@ -16,7 +16,13 @@ SUV 项目总结
 ​		SUV主要分为以下四个功能模块，每个模块对应一个微服务：
 
 * 原始数据收集模块：data-collector service，负责从RabbitMQ中收集job和testcase相关的Eiffel Message，处理成原始数据并入库。
-* STP信息管理模块：stp-manager，负责从外部接口查询STP的详细信息，保存入库并缓存，以及从RabbitMQ中收集stpconfig相关的Eiffel Message用来更新数据库和缓存。
+* STP信息管理模块：stp-info，负责从外部接口（TGF）查询STP的详细信息，保存入库并缓存，以及从RabbitMQ中收集stpconfig相关的Eiffel Message用来更新数据库和缓存。
 * 数据计算模块：data-processor service，从数据库中读取原始数据并计算，并将计算后的数据保存入库。
 * 消息恢复模块：data-recovery service，查找由于异常丢失的Eiffel Message并发送给数据收集模块进行恢复。
+
+## 四、系统结构图
+
+![alt data-collector-db](./image/suv-system.png)
+
+## 五、SUV中解决的主要问题
 
