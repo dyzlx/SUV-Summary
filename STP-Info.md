@@ -18,9 +18,11 @@
 
 ## 三、缓存的实现
 
-​		Data-collector接收到的Job相关的Message的数量较多，每一个JobStartedMessage都要向Stp-Info服务发送StpName，Stp-Info如果没有这个Stp信息，就会请求TGF API，该API的返回速度较慢，会严重影响SUV处理Eiffel Message的效率，并且STP的信息（capalibity信息）很少改动，所以这里使用缓存，将STP的信息缓存起来，这样data-collector每次方位Stp-Info，只要访问缓存有数据，就返回成功。Stp-Info服务监听Message Bus中关于STP配置变更的消息来更新缓存和数据库。
+​		Data-collector接收到的Job相关的Message的数量较多，每一个JobStartedMessage都要向Stp-Info服务发送StpName，Stp-Info如果没有这个Stp信息，就会请求TGF API，该API的返回速度较慢，会严重影响SUV处理Eiffel Message的效率，并且STP的信息（capalibity信息）很少改动，所以这里使用缓存，将STP的信息缓存起来，这样data-collector每次访问Stp-Info，只要访问缓存有数据，就返回成功，同理data-processed服务每次查询stp的capability信息，都会先访问缓存，提高处理的速度。Stp-Info服务监听Message Bus中关于STP配置变更的消息来更新缓存和数据库。
 
-​		使用Redis的Hash结构存储STP的capability信息，Key为StpName，每一对Field和Value，分别为该STP的一对capability key/value。
+​		使用Redis的Hash结构存储STP的capability信息，Key为StpName，每一对Field和Value，分别为该STP的一对capability key/value。每一个Hash数据的过期时间设置为10分钟。
+
+​		Redis使用一个简单的哨兵模式的集群结构，一个主节点，一个从节点，一个哨兵节点。
 
 ## 四、数据处理流程
 
@@ -47,5 +49,20 @@
 
 ## 五、该模块中解决的主要问题
 
+### 1. 多个请求访问不存在的STP造成多线程重复查库和重复访问TGF API（缓存击穿）
 
+​		Data-Collector服务携带StpName访问Stp-Info服务，如果缓存中不存在该STP信息，那么就会去查询数据库，如果数据库不存在就会查询TGF API。加入现在data-collector同时收到多个JobStartedMessage，其使用了同一个STP，并且该STP在STP-info服务的缓存和数据库中都不存在，那么这几个STP-info服务就会收到同一个STP Name的多次请求，多个线程会同时查询数据库，再同时查询TGF API。造成资源浪费，当这样的请求太多还会严重影响数据库和TGF API的性能。
 
+​		解决方法就是，当Stp-info服务收到多个相同的STP请求，且缓存中不存在时，只能让一个请求去访问数据库再访问TGF API，然后该线程回写缓存后，再让其他线程重新从缓存中读取。具体的做法就是使用Redis的分布式锁，多请求访问，缓存中不存在，一个线程加锁，访问数据库，访问TGF API，回写缓存，然后解锁，其他线程再尝试访问缓存。
+
+​		这里需要注意下面几点：
+
+- 这个分布式锁不能阻塞其他STP的访问请求，所以不同的STP name的请求应该加不同的分布式锁对象。
+- Redis分布式锁可能造成死锁问题（由于未及时解锁，或者解锁出现异常），所以应该给分布式锁添加合适的过期时间啊。
+- Redis分布式锁加锁操作和设置过期时间操作，以及判断锁和解锁操作的原子性问题，应该使用Lua脚本，或者原子命令。
+- Redis分布式锁的误解锁问题，给每一个分布式锁匹配一个和加锁线程相关的唯一ID，解锁时需要判断该唯一ID。
+- Redis分布式锁的可重入性问题。
+
+### 2. Capability更新一个还没有及时被data-collector处理的STP
+
+​		首先从TGF的角度来说明这个问题，TGF使用某个STP执行一个Job，执行该任务结束后，该STP的capability信息发生了变动。正常情况下，TGF使用STP执行某个Job结束后，该Job相关的那些Eiffel Message应该已经被data-collector消费，其STP的信息也应该已经被Stp-Info服务处理，然后STP-info服务才会接收到修改capability的Eiffel Message。
