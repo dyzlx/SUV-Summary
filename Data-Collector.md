@@ -41,16 +41,16 @@
 - Job表插入一条新的记录，写入job_id，job_execution_id，并将该Event中的eventTime做为job_start_time。或者根据jobId/jobExecutionId查询已经存在的纪录，并更新以上字段。（有可能是data-collector先收到了该Job其他的event，所以jobId/jobExecutionId对应的纪录已经存在）
 - JobActivity表插入一条job_activity_type为job_queue的新纪录，写入job_id，job_execution_id，并将该Event中的eventTime字段的值做为job_activity_start_time。或者根据jobId/jobExecutionId查询job_activity_type为job_queue的纪录，并更新以上字段。(有可能是data-collector先收到了该Job的JobStartedEvent，所以该jobId或者jobExecutionId对应的job_activity_type为job_queue的纪录已经存在）
 - JobActivityEvent表中插入一条新的记录，写入event_id和job_activity_id字段。
-- 从该Event中获取stp字段，使用该值访问stp-cache模块，获取stp的详细信息。
 - Event表中插入一条新的纪录，写入相关字段。
 
 ### 2、当接收到JobStartedEvent时
 
 - Job表插入一条新的纪录，写入job_id，job_execution_id。或者根据jobId/jobExecutionId查询已经存在的纪录，并更新以上字段。
-
 - JobActivity分别表插入两条job_activity_type为job_queue和job_execution的新纪录。写入job_id，job_execution_id，并将该Event中的eventTime字段的值分别做为job_activity_type为job_queue纪录的job_activity_end_time以及job_activity_type为job_execution纪录的job_activity_start_time。或者根据jobId/jobExecutionId分别查询job_activity_type为job_queue和job_execution的纪录，并更新以上字段。
 - JobActivityEvent表中插入一条新的记录，写入event_id和job_activity_id字段。
 - Event表中插入一条新的纪录，写入相关字段。
+- 从该Event中获取stp字段，使用该值访问stp-cache模块，处理stp的详细信息。
+- StpJob表插入一条记录，写入job_id，job_execution_id以及stp_name字段。
 
 ### 3、当接收到TestcaseStartedEvent时
 

@@ -63,6 +63,26 @@
 - Redis分布式锁的误解锁问题，给每一个分布式锁匹配一个和加锁线程相关的唯一ID，解锁时需要判断该唯一ID。
 - Redis分布式锁的可重入性问题。
 
-### 2. Capability更新一个还没有及时被data-collector处理的STP
+### 2.  处理stp name请求和处理capability更新不同步（没有先后顺序）
 
-​		首先从TGF的角度来说明这个问题，TGF使用某个STP执行一个Job，执行该任务结束后，该STP的capability信息发生了变动。正常情况下，TGF使用STP执行某个Job结束后，该Job相关的那些Eiffel Message应该已经被data-collector消费，其STP的信息也应该已经被Stp-Info服务处理，然后STP-info服务才会接收到修改capability的Eiffel Message。
+​		从TGF的角度来说，capability的更新动作只会在某个STP没有执行Job时发生，即要么发生在某个Job执行之后，要么发生在某个Job执行之前。同时，从TGF发出Eiffel Message到这些message被data-collector和stp-info接收的时延一般在2s~3s左右。
+
+​		从stp-info服务的角度来说，接收到capability的更新信息后，要么该stp信息已经存在于stp-info的数据库中，要么该stp信息不存在。不存在的情况分两种，一种是该STP还没有执行Job，另一种是该STP的JobMessage正在路上或者正在被data-collector处理。
+
+​		stp信息不存在的情况下统一不去处理该capability的变更。等到data-collector处理了该STP的job，向stp-info发送stp name，此时stp-info自然会去查询TGF API得到最新的capability信息；存在的情况下直接更新就可以。
+
+### 3. 更新Stp capability缓存的方式
+
+​		当stp-info接收到capability更新的Eiffel Message时，其更新数据库和缓存的流程为：先更新数据库，然后删除缓存中对应的capability信息。这个更新顺序是发生脏的概率最小的方式。其他方式会大概率出现读取缓存中脏数据的可能性：
+
+​		先Update Cache再Update DB：可能造成DB和Cache数据不一致
+
+![alt data-collector-db](./image/update-cache-update-db.png)
+
+​		先Update DB再Update Cache：造成从Cache中读取到脏数据v1
+
+![alt data-collector-db](./image/update-db-update-cache.png)
+
+​		先Delete Cache再Update DB：造成从Cache中读取到脏数据v0
+
+![alt data-collector-db](./image/delete-cache-update-db.png)
