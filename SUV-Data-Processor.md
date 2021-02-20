@@ -24,7 +24,7 @@
 
 #### b) JobQueue 活跃时间
 
- 		通过job_activity表的job_activity_start_time和job_activity_end_time字段以及activity_name="job_queue"字段联合查询表job_activity、stp_job、stp_capability、stp表。获取这些数据后根据stp分组，分别遍历每一组中的数据，计算每一项数据的job_activity_end_time减job_activity_start_time的值，并将这一组中的全部差值相加，就得到该stp该时间段中JobQueue的活跃时间。
+​    	通过job_activity表的job_activity_start_time和job_activity_end_time字段以及activity_name="job_queue"字段联合查询表job_activity、stp_job、stp_capability、stp表。获取这些数据后根据stp分组，分别遍历每一组中的数据，计算每一项数据的job_activity_end_time减job_activity_start_time的值，并将这一组中的全部差值相加，就得到该stp该时间段中JobQueue的活跃时间。
 
 #### c) TestcaseExecution 活跃时间
 
@@ -47,6 +47,20 @@
 ## 五、该模块中解决的主要问题
 
 ### 1. 活跃时间计算中缺少startTime或者endTime
+
+​		在Realtime定时任务计算当前时间段的活跃时间时，可能存在某个Job的活跃时间缺少start_time或者缺少end_time，导致无法正确求得差值，其原因可能是对应的Message还没有收到或者丢失，其解决方法就是如下：
+
+​		如果JobExecution活跃时间的计算中缺少end_time，即还没有收到JobFinishedMessage，则使用当前STP下一个Job的JobQueue Activity的start_time替代，如果该start_time已经超过了当前时间区间，则使用当前时间区间的端点值替代。并且将这个异常计入数据库表job_activity_no_data。
+
+​		如果JobQueue活跃时间的计算中缺少end_time（相当于JobExecution缺少start_time），即还没有收到JobStartedMessage，则使用当前STP当前Job的JobExecution Activity的end_time替代，如果是JobExecution活跃时间的计算，就使用当前STP当前Job的JobQueue Activity的start_time替代。如果该替代值已经超过了当前时间区间，则使用当前时间区间的端点值替代。并且将这个异常计入数据库表job_activity_no_data。
+
+​		如果JobQueue活跃时间的计算中缺少start_time，即还没有收到JobQueueMessage，
+
+​		如果TestcaseExecution活跃时间计算中缺少start_time或者end_time，就用相邻testcase的end_time或者start_time替代，替代的时间超过时间区间的端点，就用端点的值替代。并将这个异常计入数据表job_activity_no_data。
+
+​		
+
+​		
 
 ### 2. 活跃时间计算中发生两个Job时间段重叠
 
